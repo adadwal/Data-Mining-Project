@@ -33,7 +33,6 @@ See "VariableDescription"
 ccd <- read_excel("dccc.xls") %>% 
   as.data.frame
 str(ccd)
-names(ccd)
 attach(ccd)
 ```
 #####   ~  NA check  ~
@@ -54,20 +53,10 @@ str(ccd)
 ccd %>% 
   filter(EDUCATION %!in% c(1:4)) # 345
 summary(ccd$EDUCATION) # 14 have 0, 280 have 5, 51 have 6
-ccd %>% 
-  filter(MARRIAGE == 0) # 54
-ccd %>% 
-  filter(PAY_0 == "-2") # 2759
-ccd %>%   
-  filter(PAY_2 == "-2") # 3782
-ccd %>% 
-  filter(PAY_3 == "-2") # 4085
-ccd %>% 
-  filter(PAY_4 == "-2") # 4348
 
 # pull them out
 ccd %>% 
-  dplyr::select(ID,EDUCATION,MARRIAGE,PAY_0,PAY_2,PAY_3,PAY_4) %>% 
+  dplyr::select(ID,EDUCATION,MARRIAGE,PAY_0,PAY_2,PAY_3,PAY_4) %>%
   dplyr::filter(PAY_0 %!in% c(-1:9) |PAY_2 %!in% c(-1:9) |
            PAY_3 %!in% c(-1:9)|PAY_4 %!in% c(-1:9)) 
 
@@ -82,29 +71,24 @@ NotValidValueSet <- ccd %>%
 #####   ~  Actions token for Unexpected level and values  ~
 ```{r}
 ccd$EDUCATION <- as.numeric(as.character(ccd$EDUCATION))
-ccd$MARRIAGE <- as.numeric(as.character(ccd$MARRIAGE))
 
+# According to the additional material, we rewrite the values as follow:
+# All Education ( 0,4,5,6 ) = 4
 credDe <- ccd %>% 
-  dplyr::mutate(EDUCATION = ifelse(EDUCATION == 0, 1, EDUCATION)) %>%
-  dplyr::mutate(EDUCATION = ifelse(EDUCATION == 5, 4, EDUCATION)) %>%
-  dplyr::mutate(EDUCATION = ifelse(EDUCATION == 6, 4, EDUCATION)) %>%
-  dplyr::mutate(MARRIAGE = ifelse(MARRIAGE == 0, 3, MARRIAGE))
+  dplyr::mutate(EDUCATION = ifelse(EDUCATION == "0", "4", EDUCATION)) %>%
+  dplyr::mutate(EDUCATION = ifelse(EDUCATION == "5", "4", EDUCATION)) %>%
+  dplyr::mutate(EDUCATION = ifelse(EDUCATION == "6", "4", EDUCATION))
 droplevels.data.frame(credDe)
 unique(credDe$EDUCATION)
 unique(credDe$MARRIAGE)
 
-# change back to numer
-for(i in c(3,7:12)){
-  credDe[,i] <- as.numeric(as.character(credDe[,i]))
-}
-
+credDe$EDUCATION <- as.factor(credDe$EDUCATION)
 credDe <- credDe %>% 
   plyr::rename(c("default payment next month" = "DorND")) %>% 
   dplyr::mutate(DorND=ifelse(DorND == 0, "NotDefault","Default"))
 ```
 ###   ~  Exploratory Data Analysis  ~  
 ```{r}
-summary(as.factor(credDe$MARRIAGE))
 mosaicplot(~SEX+EDUCATION+MARRIAGE+`default payment next month`, data = credDe)
 
 ggplot(credDe,aes(LIMIT_BAL,fill=SEX)) +
@@ -131,7 +115,7 @@ for(i in c(3:5,7:12,25)){
 ###   ~  Models  ~   @@
 ####   ~  Train, Valid, Test  ~
 ```{r}
-set.seed(3099)
+set.seed(39)
 # Standardised Data, 0.7 Train & 0.3 Test
 train <- (sample(1:dim(stdccd)[1],0.7*dim(stdccd)[1]))
 
@@ -141,8 +125,8 @@ PredictXTrain <- stdccd$DorND[train]  # Train Y
 ResponseTest <- stdccd$DorND[-train]  # Test Y
 
 # Original Data, 0.7 Train & 0.3 Test
-TTTrain <- 
-TTTest <- 
+# TTTrain <- 
+# TTTest <- 
   
 # Standardised Data, 0.6 Train & 0.2 Validation & 0.2 Test
   
@@ -176,7 +160,7 @@ ggplot(LRTRP,aes(x=CutOff,y=TestError)) +
 ```
 #####   ~  Logistic Regression  (with only significant predictor)~   
 ```{r}
-glm.fit <- glm(DorND~LIMIT_BAL+SEX+EDUCATION+MARRIAGE+AGE+PAY_0+PAY_2+PAY_3+PAY_4+BILL_AMT1+PAY_AMT1+PAY_AMT2,data=stdccd[,-1],subset = train, family = binomial)
+glm.fit <- glm(DorND~LIMIT_BAL+SEX+EDUCATION+MARRIAGE+AGE+PAY_0+BILL_AMT2+PAY_AMT1+PAY_AMT2+PAY_AMT6,data=stdccd[,-1],subset = train, family = binomial)
 summary(glm.fit)
 glm.prob <- predict(glm.fit,TTstdTest,type="response")
 
@@ -243,7 +227,7 @@ testX <- stdccd[-train,-c(1,25)]
 trainY <- PredictXTrain
 testY <- ResponseTest
 set.seed(3099)
-KnnError <- data.frame(k=1:100,TestError=rep(0,100))
+KnnError <- data.frame(k=1:30,TestError=rep(0,30))
 # k from 1 to 100
 for(i in 1:30){
   rm <- knn(trainX,testX,trainY,k=i)
@@ -253,6 +237,7 @@ ggplot(KnnError,aes(x=k,y=TestError)) +
   geom_point()
 KnnError %>% 
   arrange(TestError)
+which.min(KnnError$TestError)
 ```
 
 ####   ~  Shrinkage Method  ~
@@ -268,10 +253,14 @@ ylab=" Adjusted RSq",type="l")
 #####   ~  LASSO Regression  ~   
 ```{r}
 library(glmnet)
-x <- model.matrix(DorND~.,data=stdccd[,-1])
+x <- model.matrix(DorND~.,data=stdccd[,-1])[,-1]
 y <- stdccd$DorND
 grid=10^seq(10,-2,length=100)
-lasso.mod <- glmnet(x,y,alpha=1,lambda = grid)
+lasso.mod <- glmnet()
+
+set.seed(39)
+ridge <- glmnet(x[train],y[train],alpha=1)
+
 ```
 #####   ~  Logistic Regression  ~   
 ```{r}
