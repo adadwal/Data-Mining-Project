@@ -1,0 +1,305 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+###   ~  CreditCardDefault  ~
+####   ~  Library  ~
+```{r}
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(plyr)
+library(ISLR)
+library(MASS)
+library(class)
+library(boot)
+library(leaps)
+```
+####   ~  Slef-Defined Functions  ~ 
+```{r}
+# Not in, opporsite of %in%
+'%!in%' <- function(x,y)!('%in%'(x,y))
+
+#
+
+```
+
+###   ~  EDA  ~   
+####    ~  Data Preprocessing  ~
+#####   ~  Details of Variables  ~  
+See "VariableDescription"
+#####   ~  Read  ~
+```{r}
+ccd <- read_excel("dccc.xls") %>% 
+  as.data.frame
+str(ccd)
+names(ccd)
+attach(ccd)
+```
+#####   ~  NA check  ~
+```{r}
+NAsCheck <- data.frame(Variables=names(ccd),NAs=rep(0,25))
+for(i in 1:dim(ccd)[2]){
+  NAsCheck[i,2] <- summary(is.na(ccd[,i]))[3]
+}
+# No missing value was found
+```
+#####   ~  Unexpected Value check  ~ 
+```{r}
+for(i in c(3:5,7:12,25)){
+  ccd[,i]=as.factor(ccd[,i])
+}
+str(ccd)
+
+ccd %>% 
+  filter(EDUCATION %!in% c(1:4)) # 345
+summary(ccd$EDUCATION) # 14 have 0, 280 have 5, 51 have 6
+ccd %>% 
+  filter(MARRIAGE == 0) # 54
+ccd %>% 
+  filter(PAY_0 == "-2") # 2759
+ccd %>%   
+  filter(PAY_2 == "-2") # 3782
+ccd %>% 
+  filter(PAY_3 == "-2") # 4085
+ccd %>% 
+  filter(PAY_4 == "-2") # 4348
+
+# pull them out
+ccd %>% 
+  dplyr::select(ID,EDUCATION,MARRIAGE,PAY_0,PAY_2,PAY_3,PAY_4) %>% 
+  dplyr::filter(PAY_0 %!in% c(-1:9) |PAY_2 %!in% c(-1:9) |
+           PAY_3 %!in% c(-1:9)|PAY_4 %!in% c(-1:9)) 
+
+NotValidValueSet <- ccd %>% 
+  dplyr::select(ID,EDUCATION,MARRIAGE,PAY_0,PAY_2,PAY_3,PAY_4) %>% 
+  dplyr::filter(EDUCATION %!in% c(1:4) | MARRIAGE %!in% c(1:3) |
+           PAY_0 %!in% c(-1:9) |PAY_2 %!in% c(-1:9) |
+           PAY_3 %!in% c(-1:9)|PAY_4 %!in% c(-1:9)) %>%
+  as.data.frame
+# 5681 observations have at least 1 non valid value
+```
+#####   ~  Actions token for Unexpected level and values  ~
+```{r}
+ccd$EDUCATION <- as.numeric(as.character(ccd$EDUCATION))
+ccd$MARRIAGE <- as.numeric(as.character(ccd$MARRIAGE))
+
+credDe <- ccd %>% 
+  dplyr::mutate(EDUCATION = ifelse(EDUCATION == 0, 1, EDUCATION)) %>%
+  dplyr::mutate(EDUCATION = ifelse(EDUCATION == 5, 4, EDUCATION)) %>%
+  dplyr::mutate(EDUCATION = ifelse(EDUCATION == 6, 4, EDUCATION)) %>%
+  dplyr::mutate(MARRIAGE = ifelse(MARRIAGE == 0, 3, MARRIAGE))
+droplevels.data.frame(credDe)
+unique(credDe$EDUCATION)
+unique(credDe$MARRIAGE)
+
+# change back to numer
+for(i in c(3,7:12)){
+  credDe[,i] <- as.numeric(as.character(credDe[,i]))
+}
+
+credDe <- credDe %>% 
+  plyr::rename(c("default payment next month" = "DorND")) %>% 
+  dplyr::mutate(DorND=ifelse(DorND == 0, "NotDefault","Default"))
+```
+###   ~  Exploratory Data Analysis  ~  
+```{r}
+summary(as.factor(credDe$MARRIAGE))
+mosaicplot(~SEX+EDUCATION+MARRIAGE+`default payment next month`, data = credDe)
+
+ggplot(credDe,aes(LIMIT_BAL,fill=SEX)) +
+  geom_histogram()
+ggplot(credDe,aes(AGE,fill=SEX)) +
+  geom_histogram()
+
+
+
+```
+####   ~  Standardised  ~  
+```{r}
+stdccd <- credDe 
+for(i in c(2,6,13:24)){
+  stdccd[,i] <- (stdccd[,i] - mean(stdccd[,i]))/sd(stdccd[,i])
+}
+
+for(i in c(3:5,7:12,25)){
+  stdccd[,i] <- as.factor(stdccd[,i])
+}
+
+```
+
+###   ~  Models  ~   @@
+####   ~  Train, Valid, Test  ~
+```{r}
+set.seed(3099)
+# Standardised Data, 0.7 Train & 0.3 Test
+train <- (sample(1:dim(stdccd)[1],0.7*dim(stdccd)[1]))
+
+TTstdTrain <- stdccd[train,]  # Train 
+TTstdTest <- stdccd[-train,]  # Test
+PredictXTrain <- stdccd$DorND[train]  # Train Y 
+ResponseTest <- stdccd$DorND[-train]  # Test Y
+
+# Original Data, 0.7 Train & 0.3 Test
+TTTrain <- 
+TTTest <- 
+  
+# Standardised Data, 0.6 Train & 0.2 Validation & 0.2 Test
+  
+  
+# Original Data, 0.6 Train & 0.2 Validation & 0.2 Test 
+
+```
+####   ~  Regression
+#####   ~  Logistic Regression  ~   
+```{r}
+glm.fit <- glm(DorND~.,data=stdccd[,-1],subset = train, family = binomial)
+summary(glm.fit)
+glm.prob <- predict(glm.fit,TTstdTest,type="response")
+
+# 0: Default,  1: NotDefault
+contrasts(stdccd[,25])
+
+# LRTRP plot  -->  different cut off
+LRTRP <- data.frame(CutOff=seq(0.3,0.7,0.05), TestError=rep(0,9))
+for(i in seq(0.3,0.7, 0.05)){
+  glm.pred <- rep("Default",9000)  # 9000 test set
+  glm.pred[glm.prob > i] ="NotDefault"
+  p <- i*20-5
+  LRTRP[p,2] <- mean(glm.pred != ResponseTest)
+}
+LRTRP
+ggplot(LRTRP,aes(x=CutOff,y=TestError)) +
+  geom_point()
+
+# table(glm.pred,ResponseTest)
+```
+#####   ~  Logistic Regression  (with only significant predictor)~   
+```{r}
+glm.fit <- glm(DorND~LIMIT_BAL+SEX+EDUCATION+MARRIAGE+AGE+PAY_0+PAY_2+PAY_3+PAY_4+BILL_AMT1+PAY_AMT1+PAY_AMT2,data=stdccd[,-1],subset = train, family = binomial)
+summary(glm.fit)
+glm.prob <- predict(glm.fit,TTstdTest,type="response")
+
+# 0: Default,  1: NotDefault
+contrasts(stdccd[,25])
+
+# Confusion Table
+glm.pred <- rep("Default",9000)  # 9000 test set
+glm.pred[glm.prob > 0.5] ="NotDefault"
+table(glm.pred,ResponseTest)
+
+# correct prediction rete
+mean(glm.pred == ResponseTest)
+
+# Test Error Rate
+LRTER <- mean(glm.pred != ResponseTest)
+# Worst than before
+
+# LRSTRP plot  -->  different cut off
+LRSTRP <- data.frame(CutOff=seq(0.3,0.7,0.05), TestError=rep(0,9))
+for(i in seq(0.3,0.7, 0.05)){
+  glm.pred <- rep("Default",9000)  # 9000 test set
+  glm.pred[glm.prob > i] ="NotDefault"
+  p <- i*20-5
+  LRSTRP[p,2] <- mean(glm.pred != ResponseTest)
+}
+LRSTRP
+ggplot(LRSTRP,aes(x=CutOff,y=TestError)) +
+  geom_point()
+
+```
+#####   ~  Linear Discriminant Analysis  ~
+```{r}
+library(MASS)
+lda.fit <- lda(DorND~.,data=stdccd[,-1],subset=train)
+lda.fit
+plot(lda.fit)
+lda.pred <- predict(lda.fit,TTstdTest)
+names(lda.pred)
+lda.class <- lda.pred$class
+table(lda.class,ResponseTest)
+mean(lda.class==ResponseTest)
+
+sum(lda.pred$posterior[,1]>0.9)
+```
+#####  ~  Quadratic Discriminant Analysis  ~
+```{r}
+qda.fit <- qda(DorND~.,data=stdccd[,-1],subset=train)
+qda.fit
+qda.pred <- predict(qda.fit,TTstdTest)
+names(qda.pred)
+qda.class <- qda.pred$class
+table(qda.class,ResponseTest)
+mean(qda.class==ResponseTest)
+
+sum(lda.pred$posterior[,1]>0.9)
+```
+####   ~  K nearest neighbors  ~
+```{r}
+library(MASS)
+library(class)
+trainX <- stdccd[train,-c(1,25)] 
+testX <- stdccd[-train,-c(1,25)] 
+trainY <- PredictXTrain
+testY <- ResponseTest
+set.seed(3099)
+KnnError <- data.frame(k=1:100,TestError=rep(0,100))
+# k from 1 to 100
+for(i in 1:30){
+  rm <- knn(trainX,testX,trainY,k=i)
+  KnnError[i,2] <- mean(rm != testY)
+}
+ggplot(KnnError,aes(x=k,y=TestError)) +
+  geom_point()
+KnnError %>% 
+  arrange(TestError)
+```
+
+####   ~  Shrinkage Method  ~
+```{r}
+regfit.full <- regsubsets(DorND~.,stdccd[,-1])
+reg.summary <- summary(regfit.full)
+names(reg.summary)
+reg.summary$rsq
+plot(reg.summary$rss ,xlab="Number of Variables ",ylab=" RSS", type="l")
+plot(reg.summary$adjr2 ,xlab="Number of Variables ",
+ylab=" Adjusted RSq",type="l")
+```
+#####   ~  LASSO Regression  ~   
+```{r}
+library(glmnet)
+x <- model.matrix(DorND~.,data=stdccd[,-1])
+y <- stdccd$DorND
+grid=10^seq(10,-2,length=100)
+lasso.mod <- glmnet(x,y,alpha=1,lambda = grid)
+```
+#####   ~  Logistic Regression  ~   
+```{r}
+
+```
+####   ~  Neural Network   ~   
+```{r}
+
+```
+####   ~  Random Forest  ~   
+```{r}
+
+```
+####   ~  Support Vector Machine  ~   
+```{r}
+
+```
+
+
+#### BINS
+```{r}
+# Levels in each variable
+UVCheck <- data.frame(Variables=names(ccd),Levels=rep(0,25))
+for(i in 1:dim(ccd)[2]){
+  UVCheck[i,2] <- sum(count(unique(ccd[,i]))[,2])
+}
+UVCheck
+unique(ccd$PAY_3)
+summary(ccd)
+```
+
